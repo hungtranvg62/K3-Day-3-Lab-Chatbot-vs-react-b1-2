@@ -1,0 +1,33 @@
+flowchart TD
+    A[User request] --> B{Có dấu hiệu cấp cứu?}
+    B -- Có --> C[Safe fallback: dừng đặt lịch và hướng dẫn cấp cứu]
+    B -- Không --> D{Cần dữ liệu động hoặc side effect?}
+
+    D -- Không --> E[Chatbot path]
+    E --> E1[Đúng 1 LLM call]
+    E1 --> E2[0 tool call]
+    E2 --> Z[Final Answer]
+
+    D -- Có --> F{Đủ dữ kiện bắt buộc?}
+    F -- Không --> G[Hỏi lại ngắn gọn, không tự đoán]
+    G --> Z
+    F -- Có --> H[ReAct Agent path]
+
+    H --> I[Thought: chọn một bước tiếp theo]
+    I --> J[Action: gọi đúng một tool]
+    J --> K[Application kiểm tra tên và tham số]
+    K --> L[Observation thật từ tool]
+    L --> M{Đủ bằng chứng?}
+    M -- Chưa --> N{Lặp Action hoặc đạt MAX_ITERATIONS?}
+    N -- Không --> I
+    N -- Có --> O[Safe fallback, không bịa dữ liệu]
+    O --> Z
+
+    M -- Đủ --> P{Có side effect đặt lịch?}
+    P -- Không --> Z
+    P -- Có --> Q{Đã check slot khớp và user yêu cầu rõ?}
+    Q -- Không --> R[Không thực hiện side effect]
+    R --> Z
+    Q -- Có --> S[book_appointment đúng một lần]
+    S --> T[Chỉ xác nhận mã hẹn từ Observation]
+    T --> Z
