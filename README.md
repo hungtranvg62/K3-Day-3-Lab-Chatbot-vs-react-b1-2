@@ -27,7 +27,7 @@ Bài Lab giúp bạn hiểu rõ sự tiến hóa qua 4 cấp độ của hệ th
 ├── 📄 requirements.txt          <-- 📦 Thư viện cần cài đặt
 │
 ├── 📁 config/                   <-- 🛠️ CẤU HÌNH & DỮ LIỆU
-│   └── 📄 test_cases.json       <-- 🟢 [Role 1] Bộ đề 5 Test Cases thử thách AI
+│   └── 📄 test_cases.json       <-- 🟢 [Role 1] 10 Test Cases tinh gọn
 │
 ├── 📁 src/                      <-- 💻 MÃ NGUỒN PYTHON (BOILERPLATE)
 │   ├── 📄 tools.py              <-- 🛠️ [Role 2] Khai báo các công cụ (Tools)
@@ -38,8 +38,22 @@ Bài Lab giúp bạn hiểu rõ sự tiến hóa qua 4 cấp độ của hệ th
     ├── 📄 CODELAB.md            <-- 🎓 [LMS Format] Hướng dẫn thực hành từng bước Codelab
     ├── 📄 PHAN_CONG_CONG_VIEC.md <-- 📋 [BẮT ĐẦU TẠI ĐÂY] Sổ tay thực hành & Checklist 5 Roles
     ├── 📄 DANH_SACH_DE_TAI.md    <-- 💡 Danh sách 10 chủ đề gợi ý
-    └── 📄 trace_eval.md          <-- 📊 [Role 5] Báo cáo Log Trace & Đánh giá Agentic Fit
+    ├── 📄 trace_eval.md          <-- 📊 [Role 5] Trace thật, RCA & Agentic Fit
+    ├── 📄 hybrid_flowchart.mermaid <-- 🔀 Chatbot path vs ReAct path
+    └── 📄 cross_audit.md         <-- ⚔️ Biên bản chấm chéo cần điền thật
 ```
+
+### Chạy và kiểm chứng
+
+```bash
+# Không cần API key; dùng MockProvider deterministic
+python src/app.py --case 4
+python src/app.py --all
+python src/app.py --demo-loop
+```
+
+> `docs/cross_audit.md` chỉ là khung ghi nhận. Nhóm phải thực hiện chấm chéo
+> thật và điền người kiểm thử, commit, raw trace và kết quả PASS/FAIL.
 
 ---
 
@@ -49,7 +63,7 @@ Bài Lab giúp bạn hiểu rõ sự tiến hóa qua 4 cấp độ của hệ th
 timeline
     title ⏱️ KỊCH BẢN THỰC HÀNH LAB 3 (Tổng thời lượng: 150 phút)
     Mốc 1 (20 phút) : Định hình & Đánh giá Agentic Fit : Chọn bài toán & Lập bảng chấm điểm Scoring Matrix
-    Mốc 2 (30 phút) : Baseline Chatbot & Khai báo Tool : Dựng Chatbot gốc & Viết Tool Specs + 5 Test Cases
+    Mốc 2 (30 phút) : Baseline Chatbot & Khai báo Tool : Dựng Chatbot gốc & Viết Tool Specs + Test Cases tinh gọn
     Mốc 3 (60 phút) : ReAct Loop & Safeguards : Viết Prompt, lắp Agent, cài Phanh Guardrails & Chạy Test
     Mốc 4 (40 phút) : Tương tác liên nhóm & Hybrid Pattern : Cross-Audit (Tấn công/Phòng thủ) & Vẽ Flowchart
 ```

@@ -99,6 +99,59 @@ EMERGENCY_KEYWORDS = [
 ]
 
 
+# Appointment state is in-memory for this deterministic lab.
+LAB_TODAY = date(2026, 7, 28)
+BOOKED_APPOINTMENTS: Dict[str, Dict[str, str]] = {}
+_APPOINTMENT_SEQUENCE = count(100)
+
+
+def _parse_appointment_date(value: str) -> Tuple[Optional[date], Optional[str]]:
+    """Validate a YYYY-MM-DD appointment date and reject past dates."""
+    if not isinstance(value, str) or not value.strip():
+        return None, "LỖI: Ngày khám là bắt buộc và phải có dạng YYYY-MM-DD."
+
+    try:
+        parsed = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None, "LỖI: Ngày khám không tồn tại hoặc sai định dạng YYYY-MM-DD."
+
+    if parsed < LAB_TODAY:
+        return None, "LỖI: Không thể tra cứu hoặc đặt lịch vào ngày trong quá khứ."
+
+    return parsed, None
+
+
+def _validate_time(value: str) -> Optional[str]:
+    """Return an error when a time is not a valid HH:MM value."""
+    if not isinstance(value, str) or not re.fullmatch(r"\d{2}:\d{2}", value.strip()):
+        return "LỖI: Giờ khám là bắt buộc và phải có dạng HH:MM."
+
+    try:
+        datetime.strptime(value.strip(), "%H:%M")
+    except ValueError:
+        return "LỖI: Giờ khám không tồn tại."
+
+    return None
+
+
+def _validate_patient_name(value: str) -> Optional[str]:
+    """Validate the minimal patient name required by the booking contract."""
+    if not isinstance(value, str):
+        return "LỖI: Tên bệnh nhân là bắt buộc."
+
+    name = value.strip()
+    if not 2 <= len(name) <= 100:
+        return "LỖI: Tên bệnh nhân phải có từ 2 đến 100 ký tự."
+
+    if not any(char.isalpha() for char in name):
+        return "LỖI: Tên bệnh nhân phải chứa chữ cái."
+
+    if not all(char.isalpha() or char in " .'-" for char in name):
+        return "LỖI: Tên bệnh nhân chứa ký tự không hợp lệ."
+
+    return None
+
+
 # ==========================================================
 # Helper: xác thực ngày khám
 # ==========================================================
@@ -135,20 +188,34 @@ def _validate_date(value: str) -> str:
 
 def suggest_specialty(symptoms: str) -> str:
     """
-    Recommend an appropriate medical specialty based on symptoms.
+    Purpose: Recommend a booking specialty from a symptom description.
 
-    This tool ONLY recommends a department for appointment booking.
-    It DOES NOT diagnose diseases or prescribe medication.
+    Use only for routing. Do not use this result as a diagnosis or prescription.
 
     Args:
-        symptoms: Patient's description of symptoms.
+        symptoms: Non-empty patient symptom description.
 
     Returns:
-        A recommendation for a medical specialty or an appropriate
-        error/guardrail message.
+        A specialty recommendation, an emergency stop message, a request for
+        more detail, or a non-raising error string.
+
+    Error semantics:
+        Invalid input returns ``LỖI: ...``; no business error raises.
+
+    Side effects:
+        None (read-only).
+
+    Example:
+        ``suggest_specialty("đầy hơi và khó tiêu")`` -> ``Tiêu hóa``.
+
+    Safety:
+        Emergency keywords stop online booking. Output is routing only.
     """
     try:
-        text = symptoms.lower()
+        if not isinstance(symptoms, str) or not symptoms.strip():
+            return "LỖI: Vui lòng cung cấp mô tả triệu chứng."
+
+        text = symptoms.lower().strip()
 
         # Guardrail: emergency symptoms
         for keyword in EMERGENCY_KEYWORDS:
@@ -159,15 +226,21 @@ def suggest_specialty(symptoms: str) -> str:
                     "hoặc gọi số cấp cứu thay vì đặt lịch trực tuyến."
                 )
 
-        # Keyword matching
+        # Prefer the longest matching phrase so a specific symptom such as
+        # "đau bụng dưới bên phải" wins over the generic "đau bụng".
+        matches = []
         for specialty, keywords in SPECIALTY_KEYWORDS.items():
             for keyword in keywords:
                 if keyword in text:
-                    return (
-                        f"Gợi ý chuyên khoa: {specialty}\n"
-                        "Lưu ý: Đây chỉ là gợi ý đặt lịch, "
-                        "không phải chẩn đoán y khoa."
-                    )
+                    matches.append((len(keyword), specialty))
+
+        if matches:
+            _, specialty = max(matches, key=lambda item: item[0])
+            return (
+                f"Gợi ý chuyên khoa: {specialty}\n"
+                "Lưu ý: Đây chỉ là gợi ý đặt lịch, "
+                "không phải chẩn đoán y khoa."
+            )
 
         return (
             "Không xác định được chuyên khoa phù hợp. "
@@ -184,14 +257,26 @@ def suggest_specialty(symptoms: str) -> str:
 
 def list_doctors(specialty: str, date: str) -> str:
     """
-    Retrieve available doctors for a specialty.
+    Purpose: List doctors who have at least one slot for a specialty and date.
 
     Args:
-        specialty: Medical specialty.
-        date: Appointment date (YYYY-MM-DD).
+        specialty: Exact specialty returned by ``suggest_specialty``.
+        date: Future appointment date in YYYY-MM-DD format.
 
     Returns:
-        A formatted list of doctors or an error message.
+        A formatted doctor list, a no-availability message, or an error string.
+
+    Error semantics:
+        Unknown specialties and invalid/past dates return messages; no crash.
+
+    Side effects:
+        None (read-only).
+
+    Example:
+        ``list_doctors("Tiêu hóa", "2026-08-01")`` returns two doctors.
+
+    Safety:
+        A doctor is listed only when a real slot exists for the requested date.
     """
     try:
         date_error = _validate_date(date)
@@ -201,11 +286,21 @@ def list_doctors(specialty: str, date: str) -> str:
         if specialty not in DOCTORS:
             return f"Không tìm thấy chuyên khoa '{specialty}'."
 
-        doctors = DOCTORS[specialty]
+        doctors = [
+            doctor
+            for doctor in DOCTORS[specialty]
+            if AVAILABLE_SLOTS.get(doctor, {}).get(date.strip())
+        ]
+
+        if not doctors:
+            return (
+                f"Không có bác sĩ khoa {specialty} còn lịch vào ngày "
+                f"{date.strip()}."
+            )
 
         result = (
             f"Danh sách bác sĩ khoa {specialty} "
-            f"({date}):\n"
+            f"({date.strip()}):\n"
         )
 
         for i, doctor in enumerate(doctors, start=1):
@@ -223,14 +318,27 @@ def list_doctors(specialty: str, date: str) -> str:
 
 def check_slots(doctor_name: str, date: str) -> str:
     """
-    Check available appointment slots for a doctor.
+    Purpose: Check current appointment slots for one doctor and date.
 
     Args:
-        doctor_name: Doctor's full name.
-        date: Appointment date.
+        doctor_name: Exact full doctor name returned by ``list_doctors``.
+        date: Future appointment date in YYYY-MM-DD format.
 
     Returns:
-        Available appointment slots or an error message.
+        Available slots, a full-schedule message, or an error string.
+
+    Error semantics:
+        Unknown doctors and invalid/past dates return messages; no crash.
+
+    Side effects:
+        None (read-only).
+
+    Example:
+        ``check_slots("BS. Nguyễn Văn Minh (15 năm kinh nghiệm)",
+        "2026-08-01")`` returns ``08:00, 09:30, 10:30``.
+
+    Safety:
+        Returned slots are copied from current in-memory availability.
     """
     try:
         date_error = _validate_date(date)
@@ -275,16 +383,30 @@ def book_appointment(
     patient_name: str,
 ) -> str:
     """
-    Book an appointment with a doctor.
+    Purpose: Create exactly one appointment after doctor and slot validation.
 
     Args:
-        doctor_name: Selected doctor.
-        date: Appointment date.
-        time: Appointment time.
-        patient_name: Patient's full name.
+        doctor_name: Exact selected doctor name.
+        date: Future appointment date in YYYY-MM-DD format.
+        time: Existing available slot in HH:MM format.
+        patient_name: Patient name; no extra identity or financial data.
 
     Returns:
-        Booking confirmation or an error message.
+        A confirmation containing an application-generated appointment ID, or
+        an error string.
+
+    Error semantics:
+        Missing/invalid fields and unavailable slots return messages; no crash.
+
+    Side effects:
+        Removes the booked slot and stores an in-memory appointment record.
+
+    Example:
+        ``book_appointment(doctor, "2026-08-01", "08:00", "Nguyễn An")``.
+
+    Safety:
+        Never books an unknown doctor/date/slot and never accepts an empty or
+        instruction-like patient name.
     """
     try:
         date_error = _validate_date(date)
@@ -310,10 +432,13 @@ def book_appointment(
         # Remove booked slot
         slots.remove(time)
 
-        appointment_id = (
-            f"APT-{date.replace('-', '')}-"
-            f"{random.randint(100,999)}"
-        )
+        appointment_id = f"APT-{date.replace('-', '')}-{next(_APPOINTMENT_SEQUENCE)}"
+        BOOKED_APPOINTMENTS[appointment_id] = {
+            "patient_name": patient_name,
+            "doctor_name": doctor_name,
+            "date": date,
+            "time": time,
+        }
 
         return (
             "✅ Đặt lịch thành công!\n"
