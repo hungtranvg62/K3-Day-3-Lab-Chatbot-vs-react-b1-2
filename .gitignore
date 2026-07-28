@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 env/
 venv/
+
+# File sinh tu dong khi chay demo
+demo_log.txt
