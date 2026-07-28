@@ -194,6 +194,11 @@ def run_baseline_chatbot(user_query: str, provider, verbose: bool = True) -> str
 
 ACTION_PATTERN = re.compile(r"Action:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\[(.*)\]", re.DOTALL)
 
+# Chuỗi lỗi do providers.py trả về, dạng "[Gemini Error]: ...", "[OpenAI Exception]: ...".
+# Phải khớp đúng tên provider chứ không chỉ dấu "[" — câu trả lời hợp lệ cũng có thể
+# mở đầu bằng "[" (vd: "[Danh sách bác sĩ khoa Tiêu hóa] ...") và sẽ bị bắt nhầm.
+PROVIDER_ERROR_PATTERN = re.compile(r"^\[(Gemini|OpenAI|Anthropic|OpenRouter)[^\]]*\]")
+
 
 def parse_llm_output(text: str):
     """
@@ -211,6 +216,14 @@ def parse_llm_output(text: str):
         # LLM đôi khi lặp lại nhãn "Thought:" vào trong câu trả lời cuối
         if final.startswith("Thought:"):
             final = final[len("Thought:"):].lstrip()
+        # LLM cũng hay viết thêm Thought/Action ĐẰNG SAU Final Answer -> cắt bỏ,
+        # không để lộ scaffolding kỹ thuật ra màn hình người bệnh.
+        cut = min(
+            (i for i in (final.find("\nAction:"), final.find("\nThought:")) if i != -1),
+            default=-1,
+        )
+        if cut != -1:
+            final = final[:cut].rstrip()
         return ("final", final)
 
     if idx_action != -1:
@@ -294,7 +307,7 @@ def run_react_agent(user_query: str, provider, history: str = "", verbose: bool 
 
         # Guardrail: LLM lỗi (hết quota, mất mạng, sai key) -> dừng sạch,
         # không đổ nguyên cục lỗi kỹ thuật vào mặt người dùng.
-        if raw.lstrip().startswith("["):
+        if PROVIDER_ERROR_PATTERN.match(raw.lstrip()):
             if verbose:
                 print(f"🛡️ GUARDRAIL: LLM Provider lỗi -> {raw[:120]}...")
             fallback = (
