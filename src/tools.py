@@ -11,9 +11,8 @@ Important Guardrails:
 """
 
 from datetime import date, datetime
-from itertools import count
-import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
+import random
 
 # ==========================================================
 # Fake Data
@@ -154,6 +153,36 @@ def _validate_patient_name(value: str) -> Optional[str]:
 
 
 # ==========================================================
+# Helper: xác thực ngày khám
+# ==========================================================
+
+def _validate_date(value: str) -> str:
+    """
+    Kiểm tra ngày khám. Trả về chuỗi lỗi nếu không hợp lệ, chuỗi rỗng nếu OK.
+
+    Chặn trường hợp Agent tự bịa ngày ("hôm nay", "ngày mai", "ngày_bạn_muốn"):
+    tool phải báo lỗi rõ ràng để Agent quay lại hỏi người dùng, thay vì
+    trả dữ liệu trông-như-hợp-lệ khiến Agent tưởng ngày đó có thật.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "LỖI: Thiếu ngày khám. Hãy hỏi người dùng ngày cụ thể (YYYY-MM-DD)."
+
+    try:
+        parsed = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return (
+            f"LỖI: '{value}' không phải ngày hợp lệ. "
+            "Ngày phải đúng định dạng YYYY-MM-DD (ví dụ 2026-08-01) và do người dùng "
+            "cung cấp. Không được tự suy ra 'hôm nay' hay 'ngày mai'."
+        )
+
+    if parsed < date.today():
+        return f"LỖI: Ngày {value} đã ở quá khứ. Vui lòng hỏi người dùng một ngày trong tương lai."
+
+    return ""
+
+
+# ==========================================================
 # Tool 1
 # ==========================================================
 
@@ -250,14 +279,10 @@ def list_doctors(specialty: str, date: str) -> str:
         A doctor is listed only when a real slot exists for the requested date.
     """
     try:
-        _, date_error = _parse_appointment_date(date)
+        date_error = _validate_date(date)
         if date_error:
             return date_error
 
-        if not isinstance(specialty, str) or not specialty.strip():
-            return "LỖI: Chuyên khoa là bắt buộc."
-
-        specialty = specialty.strip()
         if specialty not in DOCTORS:
             return f"Không tìm thấy chuyên khoa '{specialty}'."
 
@@ -316,15 +341,10 @@ def check_slots(doctor_name: str, date: str) -> str:
         Returned slots are copied from current in-memory availability.
     """
     try:
-        _, date_error = _parse_appointment_date(date)
+        date_error = _validate_date(date)
         if date_error:
             return date_error
 
-        if not isinstance(doctor_name, str) or not doctor_name.strip():
-            return "LỖI: Tên bác sĩ là bắt buộc."
-
-        doctor_name = doctor_name.strip()
-        date = date.strip()
         doctor_schedule = AVAILABLE_SLOTS.get(doctor_name)
 
         if doctor_schedule is None:
@@ -332,7 +352,15 @@ def check_slots(doctor_name: str, date: str) -> str:
 
         slots = doctor_schedule.get(date)
 
-        if slots is None or len(slots) == 0:
+        # Phân biệt rõ 2 tình huống: chưa có dữ liệu lịch cho ngày đó,
+        # khác hẳn với bác sĩ có lịch nhưng đã đặt hết.
+        if slots is None:
+            return (
+                f"Chưa có dữ liệu lịch khám của {doctor_name} cho ngày {date}. "
+                "Hãy đề nghị người dùng chọn ngày khác."
+            )
+
+        if len(slots) == 0:
             return "Bác sĩ đã kín lịch vào ngày này."
 
         return (
@@ -381,31 +409,18 @@ def book_appointment(
         instruction-like patient name.
     """
     try:
-        _, date_error = _parse_appointment_date(date)
+        date_error = _validate_date(date)
         if date_error:
             return date_error
 
-        time_error = _validate_time(time)
-        if time_error:
-            return time_error
-
-        name_error = _validate_patient_name(patient_name)
-        if name_error:
-            return name_error
-
-        if not isinstance(doctor_name, str) or not doctor_name.strip():
-            return "LỖI: Tên bác sĩ là bắt buộc."
-
-        doctor_name = doctor_name.strip()
-        date = date.strip()
-        time = time.strip()
-        patient_name = patient_name.strip()
+        if not isinstance(patient_name, str) or not patient_name.strip():
+            return "LỖI: Thiếu tên bệnh nhân. Hãy hỏi người dùng trước khi đặt lịch."
 
         if doctor_name not in AVAILABLE_SLOTS:
             return "Không tìm thấy bác sĩ."
 
         if date not in AVAILABLE_SLOTS[doctor_name]:
-            return "Ngày khám không hợp lệ."
+            return f"Chưa có dữ liệu lịch khám cho ngày {date}."
 
         slots = AVAILABLE_SLOTS[doctor_name][date]
 

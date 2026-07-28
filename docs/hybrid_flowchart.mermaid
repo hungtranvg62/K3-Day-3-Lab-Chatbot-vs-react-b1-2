@@ -1,33 +1,48 @@
+%% HYBRID DECISION FLOWCHART — Trợ Lý Đặt Lịch Khám Bệnh
+%% Khi nào đi Chatbot path, khi nào đi ReAct Agent path.
+%% Căn cứ: số liệu đo được trong docs/trace_eval.md mục 2.
+
 flowchart TD
-    A[User request] --> B{Có dấu hiệu cấp cứu?}
-    B -- Có --> C[Safe fallback: dừng đặt lịch và hướng dẫn cấp cứu]
-    B -- Không --> D{Cần dữ liệu động hoặc side effect?}
+    A[👤 Câu hỏi người dùng] --> B{🚨 Có dấu hiệu cấp cứu?<br/>đau ngực dữ dội, khó thở,<br/>co giật, bất tỉnh, méo mặt...}
 
-    D -- Không --> E[Chatbot path]
-    E --> E1[Đúng 1 LLM call]
-    E1 --> E2[0 tool call]
-    E2 --> Z[Final Answer]
+    B -->|Có| EMER[🛑 CẮT LUỒNG NGHIỆP VỤ<br/>Hướng dẫn gọi 115<br/>Tool calls = 0]
 
-    D -- Có --> F{Đủ dữ kiện bắt buộc?}
-    F -- Không --> G[Hỏi lại ngắn gọn, không tự đoán]
-    G --> Z
-    F -- Có --> H[ReAct Agent path]
+    B -->|Không| C{🔍 Câu hỏi có cần<br/>DỮ LIỆU THẬT của phòng khám<br/>hoặc HÀNH ĐỘNG ghi dữ liệu?}
 
-    H --> I[Thought: chọn một bước tiếp theo]
-    I --> J[Action: gọi đúng một tool]
-    J --> K[Application kiểm tra tên và tham số]
-    K --> L[Observation thật từ tool]
-    L --> M{Đủ bằng chứng?}
-    M -- Chưa --> N{Lặp Action hoặc đạt MAX_ITERATIONS?}
-    N -- Không --> I
-    N -- Có --> O[Safe fallback, không bịa dữ liệu]
-    O --> Z
+    C -->|Không cần<br/>chỉ là kiến thức chung| CHAT[💬 CHATBOT PATH - Cấp 2<br/>1 LLM call, 0 tool]
+    CHAT --> CHATOUT[📤 Trả lời trực tiếp<br/>Vd #1: khác biệt giữa các khoa<br/>Vd #2: giới hạn hệ thống]
 
-    M -- Đủ --> P{Có side effect đặt lịch?}
-    P -- Không --> Z
-    P -- Có --> Q{Đã check slot khớp và user yêu cầu rõ?}
-    Q -- Không --> R[Không thực hiện side effect]
-    R --> Z
-    Q -- Có --> S[book_appointment đúng một lần]
-    S --> T[Chỉ xác nhận mã hẹn từ Observation]
-    T --> Z
+    C -->|Cần| D{📅 Đã đủ thông tin<br/>bắt buộc chưa?<br/>ngày YYYY-MM-DD, tên bệnh nhân}
+
+    D -->|Thiếu| ASK[❓ HỎI LẠI NGAY<br/>Nêu rõ đã biết gì, còn cần gì<br/>KHÔNG tự bịa ngày]
+    ASK --> A
+
+    D -->|Đủ| REACT[🤖 REACT AGENT PATH - Cấp 3<br/>Vòng lặp Thought → Action → Observation]
+
+    REACT --> T1[🛠️ suggest_specialty<br/>triệu chứng → chuyên khoa]
+    T1 --> T2[🛠️ list_doctors<br/>chuyên khoa + ngày → bác sĩ]
+    T2 --> T3[🛠️ check_slots<br/>bác sĩ + ngày → giờ trống]
+    T3 --> T4[🛠️ book_appointment<br/>→ mã lịch hẹn APT-xxx]
+
+    T4 --> G{🛡️ GUARDRAILS}
+    T3 --> G
+    T2 --> G
+    T1 --> G
+
+    G -->|Vượt MAX_ITERATIONS = 6| STOP1[🛑 Ngắt lặp<br/>Xin lỗi + đề nghị liên hệ phòng khám]
+    G -->|Lặp lại cùng Action| STOP2[🛑 Ngắt lặp<br/>Đổi cách tiếp cận]
+    G -->|Tool trả lỗi| RETRY[↩️ Hỏi lại người dùng<br/>KHÔNG thử lại y hệt]
+    G -->|Provider lỗi/hết quota| STOP3[🛑 Fallback lịch sự<br/>Không lộ log kỹ thuật]
+    G -->|OK| OUT[📤 Final Answer<br/>Chỉ dùng dữ liệu từ Observation]
+
+    RETRY --> A
+
+    classDef chatbot fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
+    classDef agent fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef guard fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef ask fill:#fef3c7,stroke:#d97706,color:#78350f
+
+    class CHAT,CHATOUT chatbot
+    class REACT,T1,T2,T3,T4,OUT agent
+    class EMER,STOP1,STOP2,STOP3,G guard
+    class ASK,RETRY ask
